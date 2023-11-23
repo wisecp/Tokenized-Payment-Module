@@ -4,6 +4,9 @@
         function __construct()
         {
             $this->name             = __CLASS__;
+            /*
+             * This setting is used to determine the appearance of the credit card entry form. If set to 'true', the system's default credit card form is displayed. If set to 'false', you will need to prepare a custom form. You can create this custom form by creating a 'pages/payform.php' file in the module's directory. When preparing the form, you can use the 'credit-card-standard-form.php' or 'credit-card-storage-form.php' files in the 'templates/system/' directory as references. The file marked as 'storage' is applicable for forms with credit card storage capability.
+            */
             $this->standard_card    = true;
 
             parent::__construct();
@@ -89,6 +92,9 @@
 
         public function capture($params=[])
         {
+
+            // You can look at the variables you need to use at https://dev.wisecp.com/en/kb/merchant-method  and https://dev.wisecp.com/en/kb/tokenized-method
+
             $api_key            = $this->config["settings"]["example1"] ?? 'N/A';
             $secret_key         = $this->config["settings"]["example2"] ?? 'N/A';
             $storage_token      = '';
@@ -156,8 +162,33 @@
 
             if($result && $result['status'] == 'success')
                 return [
+                    // Accepted values :  'successful','pending','output','redirect','error',
                     'status' => 'successful',
+                    /*
+                     * If 'redirect' is specified in the 'status' index, the page is exited and redirected to the specified URL. This is typically used in '3D Secure' transactions. During this process, it is also necessary to use the 'callback' function.
+                    */
+                    #'redirect' => "https://pay.paymentgateway.com/checkout/12345",
+
+                    /*
+                     * If the status value is defined as "output", the data in this index will be reflected instead of the credit card information entry field.
+                    */
+                    #'output'  => '<iframe src="https://pay.paymentgateway.com/checkout/12345"></iframe>',
+
+                    /*
+                     * You can host any id number for any information you need to report to the administrator after payment or for later use in returning the invoice. This information will be stored as JSON type in the invoices.pmethod_msg field in the database.
+                     * Acceptable value : 'array' and 'string'
+                    */
                     'message' => ['Merchant Transaction ID' => $result['transaction_id']],
+
+                    /*
+                     * This index is optional and is used to indicate the total amount paid on the side of the payment intermediary. If the paid amount exceeds the total amount of the invoice, the excess is added to the invoice as a payment commission. This index contains two sub-indices: The first sub-index, 'amount', should be of the float type. 'Currency' refers to the currency code, which should be specified according to ISO 4217 standards.
+                    */
+                    'paid'           => [
+                        'amount'        =>  15,
+                        'currency'      => 'USD',
+                    ],
+
+                    // Token information you obtain from the service provider
                     'card_storage_token' => $result["storage_token"] ?? '',
                 ];
             else
@@ -212,6 +243,7 @@
          */
         public function callback()
         {
+            // Obtain the custom id that you forwarded to the payment provider.
             $custom_id      = (int) Filter::init("POST/custom_id","numbers");
 
             if(!$custom_id){
@@ -219,6 +251,7 @@
                 return false;
             }
 
+            // Let's get the checkout information.
             $checkout       = $this->get_checkout($custom_id);
 
             // Checkout invalid error
@@ -237,44 +270,41 @@
                 /* You can define it as 'successful' or 'pending'.
                  * 'successful' : Write if the payment is complete.
                  * 'pending' : Write if the payment is pending confirmation.
-                 */
+                */
                 'status'            => 'successful',
 
                 /*
-                 * If there is anything you need to inform the manager about the payment, please fill it out.
+                 * You can host any id number for any information you need to report to the administrator after payment or for later use in returning the invoice. This information will be stored as JSON type in the invoices.pmethod_msg field in the database.
                  * Acceptable value : 'array' and 'string'
-                 */
+                */
                 'message'        => [
                     'Merchant Transaction ID' => '123X456@23',
                 ],
-                // Write if you want to show a message to the person on the callback page.
+
+                /*
+                 * When requests are sent to the callback address regarding the status of the payment, you can use this field to provide a specific response. If you do not use this field, the response will direct to the 'Payment Completed' page if the payment is successful, or to the 'Payment Failed' page if it is unsuccessful.
+                */
                 'callback_message'        => 'Transaction Successful',
+                /*
+                 * This index is optional and is used to indicate the total amount paid on the side of the payment intermediary. If the paid amount exceeds the total amount of the invoice, the excess is added to the invoice as a payment commission. This index contains two sub-indices: The first sub-index, 'amount', should be of the float type. 'Currency' refers to the currency code, which should be specified according to ISO 4217 standards.
+                */
 
                 // Usage card storage token
                 'card_storage_token' => $this->checkSaveCard() ? '1a2b3c4d5e6f' : '',
-
-                'paid'                    => [
-                    'amount'        => 15,
-                    'currency'      => "USD",
-                ],
             ];
         }
 
-        /*
-         * If your payment service provider does not support the refund feature, you can remove the functionality.
-         */
-        public function refund($checkout=[])
+        // If your payment service provider does not support the refund feature, you can remove the functionality.
+        public function refundInvoice($invoice=[])
         {
-            $custom_id      = $checkout["id"];
             $api_key        = $this->config["settings"]["example1"] ?? 'N/A';
             $secret_key     = $this->config["settings"]["example2"] ?? 'N/A';
-            $amount         = $checkout["data"]["total"];
-            $currency       = $this->currency($checkout["data"]["currency"]);
-            $invoice_id     = $checkout["data"]["invoice_id"] ?? 0;
+            $amount         = $invoice["total"];
+            $currency       = $this->currency($invoice["currency"]);
 
-            $invoice            = Invoices::get($invoice_id);
+            // In callback or capture functions, the data transmitted as 'message' in the return value is retrieved.
             $method_msg         = Utility::jdecode($invoice["pmethod_msg"] ?? [],true);
-            $transaction_id     = $method_msg["Transaction ID"] ?? false;
+            $transaction_id     = $method_msg["Merchant Transaction ID"] ?? false;
 
 
 
